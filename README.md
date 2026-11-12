@@ -17,7 +17,7 @@ Copy `a1s-sendspin-source.yaml` into your ESPHome config directory, provide `wif
 
 - **Picking up new sendspin-cpp pushes:** the IDF component manager locks the fetched commit, so after pushing to the sendspin-cpp branch, clean the build files before rebuilding.
 - **Server:** the branch sends `client-stream/start` / `client-stream/end`. aiosendspin needs [Sendspin/aiosendspin#358](https://github.com/Sendspin/aiosendspin/pull/358) to accept those names.
-- **Input:** the `ADC Input` select switches between `LINE2` (3.5 mm line-in, the boot default) and `LINE1` (onboard mics).
+- **Input:** the `ADC Input` select switches between `LINE2` (3.5 mm line-in, the boot default) and `LINE1` (onboard mics). There's also an input gain selector.
 - **Codec variant:** the boot log's I²C scan should show `0x10`. `0x1A` is the AC101 variant, which this config does not support.
 
 ## Known quirks
