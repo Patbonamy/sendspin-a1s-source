@@ -1,19 +1,6 @@
-# ESP32-A1S Audio Kit (ES8388 variant) as a Sendspin source: streams the ES8388 ADC to a Sendspin server.
-#
-# Test rig for the sendspin-cpp source@v1 stack (Sendspin/sendspin-cpp#112-#117). components/sendspin in
-# https://github.com/chrisuthe/sendspin-a1s-source is ESPHome 2026.8.2's sendspin component pointed at that branch
-# (SENDSPIN_CPP_REF in __init__.py) with a `source:` block added.
-#
-# Pinout is the one shared by every A1S config linked from
-# https://community.home-assistant.io/t/esp32-a1s-audio-kit-media-player/522245 (arhills, el-bakkali, Test-subj):
-#   I2C  SDA 33, SCL 32 (ES8388 at 0x10)    I2S  MCLK 0, BCLK 27, LRCK 25, DIN 35 (DOUT 26 unused here)
-#
-# Source only: ESPHome's i2s_audio has no full-duplex mode, and a speaker on this bus would hold the I2S lock
-# the microphone needs.
-
 esphome:
-  name: a1s-sendspin-source
-  friendly_name: A1S Sendspin Source
+  name: sendspin-source-1
+  friendly_name: Sendspin Source 1
   min_version: 2026.8.0
   on_boot:
     priority: -100
@@ -32,6 +19,11 @@ esphome:
           id(es8388_dac)->write_byte(0x0B, 0x00);
           // ADCCONTROL10: ALC off (the driver's voice ALC pumps music); PGA gain stays at ADCCONTROL1's 0 dB
           id(es8388_dac)->write_byte(0x12, 0x22);
+          {
+            float gain = id(input_gain).state;
+            uint8_t g = std::isnan(gain) ? 8 : (uint8_t) (gain / 3);
+            id(es8388_dac)->write_byte(0x09, (g << 4) | g);
+          }
           // ADCCONTROL14: noise gate off (the driver's gate mutes the ADC below -40.5 dBFS)
           id(es8388_dac)->write_byte(0x16, 0x00);
 
@@ -41,26 +33,65 @@ esp32:
     type: esp-idf
 
 psram:
-
+  mode: quad
+  speed: 80MHZ
+  
 logger:
 
 api:
+  encryption:
+    key: !secret api_key
 
 ota:
   - platform: esphome
 
 wifi:
+  power_save_mode: none
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   ap:
-
+    ssid: Sendspin 1 Fallback Hotspot
+    password: !secret ap_password
+  manual_ip:
+    static_ip: 192.168.1.200
+    gateway: 192.168.1.254
+    subnet: 255.255.255.0
+    
 captive_portal:
-
+# Enable Web server
+web_server:
+  port: 80
 external_components:
   # To iterate on the component without pushing, use `source: {type: local, path: components}` from a clone
-  - source: github://joshualh/sendspin-a1s-source@main
+  - source: github://Patbonamy/sendspin-a1s-source@main
     components: [sendspin]
     refresh: always
+
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+    
+# Text sensors with general information
+text_sensor:
+  # Expose WiFi information as sensors
+  - platform: wifi_info
+    ip_address:
+      name: IP
+    ssid:
+      name: SSID
+    bssid:
+      name: BSSID    
+
+# Sensors with general information
+sensor:
+  # WiFi Signal sensor
+  - platform: wifi_signal
+    name: WiFi Signal
+    update_interval: 60s
+
+  # MCU Temperature
+  - platform: internal_temperature
+    name: Temperature
 
 i2c:
   sda: GPIO33
@@ -71,6 +102,24 @@ i2c:
 audio_dac:
   - platform: es8388
     id: es8388_dac
+    
+# Input gain selector
+number:
+  - platform: template
+    name: "Input Gain"
+    id: input_gain
+    min_value: 0
+    max_value: 24
+    step: 3
+    initial_value: 24
+    unit_of_measurement: "dB"
+    mode: slider
+    optimistic: true
+    restore_value: true
+    set_action:
+      - lambda: |-
+          uint8_t g = (uint8_t) (x / 3);
+          id(es8388_dac)->write_byte(0x09, (g << 4) | g);
 
 select:
   - platform: es8388
@@ -102,9 +151,20 @@ sendspin:
     microphone:
       microphone: a1s_adc
       channels: [0, 1]
-    # Everything below defaults to sendspin-cpp's SourceRoleConfig defaults when omitted
-    # codec: opus            # pcm (default) or opus (exercises the encoder path)
-    # chunk_duration: 20ms
-    # capture_buffer: 150ms
-    # opus_bitrate: 128000
-    # opus_complexity: 2
+
+binary_sensor:
+  - platform: gpio
+    name: "Pairing Button"
+    pin:
+      number: GPIO36
+      inverted: true
+    on_press:
+      - sendspin.confirm_pairing_window:
+
+button:
+  - platform: template
+    name: "Accept pairing"
+    on_press:
+      - sendspin.confirm_pairing_window:
+  - platform: restart
+    name: Restart
